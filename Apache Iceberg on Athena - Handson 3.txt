@@ -1,0 +1,81 @@
+-- In the previous hands-on, we had to clear the source S3 area manually because duplicates in the source resulted in some unexpected behaviour during the merge. This has been handled using timestamp and rank function. So source S3 area doesnt have to be cleared after every run. Only the latest record for each id is picked for the merge. The source can have duplicates but the target will not have duplicates.
+
+create external table employee_s1 (
+   id int,
+   name string,
+   designation string,
+   salary double,
+   record_ts timestamp
+)
+partitioned by (location string)
+location 's3://vinod-iceberg-bucket/tables/employee_s1/'
+TBLPROPERTIES ('classification'='parquet');
+
+insert into employee_s1 values (1,'aaa','officer',1000,current_timestamp,'bng');
+insert into employee_s1 values (2,'bbb','supervisor',2000,current_timestamp,'chn');
+insert into employee_s1 values (3,'ccc','manager',3000,current_timestamp,'dlh');
+insert into employee_s1 values (4,'ddd','officer',4000,current_timestamp,'mum');
+insert into employee_s1 values (5,'eee','officer',5000,current_timestamp,'bng');
+insert into employee_s1 values (6,'fff','officer',6000,current_timestamp,'chn');
+
+-- Check update in first time insert
+-- before even target table is loaded teh first time, there are multiple records in source for same id
+
+insert into employee_s1 values (1,'aaa','officer',1700,current_timestamp,'bng');
+
+select * from employee_s1;
+
+select a.id, a.name, a.designation, a.salary, a.location
+from (
+select rank() over (partition by id order by record_ts desc) as rnk, * from employee_s1
+) a where a.rnk = 1;
+
+create table employee_s2 (
+   id int,
+   name string,
+   designation string,
+   salary double,
+   record_ts timestamp,
+   location string
+)
+partitioned by (location)
+location 's3://vinod-iceberg-bucket/tables/employee_s2/'
+TBLPROPERTIES ('table_type'='ICEBERG');
+
+MERGE INTO employee_s2 t 
+using (
+select a.id, a.name, a.designation, a.salary, a.location
+from (
+select rank() over (partition by id order by record_ts desc) as rnk, * from employee_s1
+) a where a.rnk = 1
+)
+s
+on (t.id = s.id)
+when matched and s.salary > 10000 
+then delete
+when matched
+then update set name = s.name, designation = s.designation, salary = s.salary, location = s.location, record_ts = current_timestamp
+when not matched 
+then insert values (s.id, s.name, s.designation, s.salary, current_timestamp, s.location);
+
+select * from employee_s2; -- only the latest record for each id is loaded
+
+-- Check update 
+
+insert into employee_s1 values (2,'bbb','senior supervisor',8500,current_timestamp,'chn');
+
+execute merge
+
+select * from employee_s1;
+
+select * from employee_s2; -- the record gets updated with new values
+
+-- check delete
+
+insert into employee_s1 values (3,'ccc','senior manager',13000,current_timestamp,'dlh');
+
+execute merge
+
+select * from employee_s1;
+
+select * from employee_s2; -- the record with matching condition get deleted from the target table

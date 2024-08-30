@@ -1,0 +1,90 @@
+create database iceberg;
+
+create table fruits (
+   id bigint,
+   fruit string,
+   berry boolean,
+   update_timestamp timestamp
+)
+partitioned by (berry)
+location 's3://vinod-iceberg-bucket/tables/fruits/'
+TBLPROPERTIES ('table_type'='ICEBERG')
+
+insert into fruits (id, fruit, berry)
+values (1,'Apple',false),
+       (2,'Banana',false),
+       (3,'Orange',false),
+       (4,'Blueberry',true),
+       (5,'Raspberry',true),
+       (6,'Pear',false);
+       
+select * from fruits;
+
+update fruits
+set fruit = 'Billberry'
+where id = 4;
+
+========================== Metadata files ===============================
+
+Snapshot file:
+snap-2631273020848295780-1-a603e8c6-60a2-455e-9e76-825472055c11.avro:
+has snapshot_id's, snapshot sequence number, list of manifest files, added rows/files, deleted rows/files
+
+Manifest files:
+a603e8c6-60a2-455e-9e76-825472055c11-m0.avro
+a603e8c6-60a2-455e-9e76-825472055c11-m1.avro
+has snapshot id and a data object -> column-level lower bounds, upper bounds, null value counts
+
+Json file:
+00002-1156e456-becd-45e7-968a-aeeb47967703.metadata
+has schema of table, current snapshot id etc
+
+
+======================== Data files ==============================
+
+COW (Copy on Write) strategy is followed.
+So when an update is done, for the affected partition, a new file is created with the new/updated value
+
+
+======================= Athena also provides insight into iceberg metadata in table format ==============================
+
+select * from "fruits$files";
+select * from "fruits$manifests";
+select * from "fruits$snapshots";
+select * from "fruits$history";
+select * from "fruits$partitions";
+select * from "fruits$refs";
+
+**************************************************************************************************************************
+
+****************************** Lets compare with non iceberg format =================================
+
+create external table fruits_non_iceberg (
+   id bigint,
+   fruit string,
+   update_timestamp timestamp
+)
+partitioned by (berry boolean)
+location 's3://vinod-iceberg-bucket/tables/fruits/'
+TBLPROPERTIES ('classification'='parquet');
+
+insert into fruits_non_iceberg (id, fruit, berry)
+values (1,'Apple',false),
+       (2,'Banana',false),
+       (3,'Orange',false),
+       (4,'Blueberry',true),
+       (5,'Raspberry',true),
+       (6,'Pear',false);
+       
+select * from fruits_non_iceberg;
+
+update fruits_non_iceberg
+set fruit = 'Billberry'
+where id = 4;
+
+Error will be thrown:
+NOT_SUPPORTED: Modifying Hive table rows is only supported for transactional tables
+This query ran against the "ecommerce-database" database, unless qualified by the query. Please post the error message on our forum  or contact customer support  with Query Id: eabbb7a5-a693-4bd2-872c-358175f44cf7
+
+Also, in the S3 location, there will only be data files under the 2 partition folders.
+No metadata files.

@@ -1,0 +1,87 @@
+create external table employee_s1 (
+   id int,
+   name string,
+   designation string,
+   salary double
+)
+partitioned by (location string)
+location 's3://vinod-iceberg-bucket/tables/employee_s1/'
+TBLPROPERTIES ('classification'='parquet');
+
+insert into employee_s1 values (1,'aaa','officer',1000,'bng');
+insert into employee_s1 values (2,'bbb','supervisor',2000,'chn');
+insert into employee_s1 values (3,'ccc','manager',3000,'dlh');
+insert into employee_s1 values (4,'ddd','officer',4000,'mum');
+insert into employee_s1 values (5,'eee','officer',5000,'bng');
+insert into employee_s1 values (6,'fff','officer',6000,'chn');
+
+select * from employee_s1;
+       
+       
+********************************************************************************
+
+
+create table employee_s2 (
+   id int,
+   name string,
+   designation string,
+   salary double,
+   location string
+)
+partitioned by (location)
+location 's3://vinod-iceberg-bucket/tables/employee_s2/'
+TBLPROPERTIES ('table_type'='ICEBERG')
+
+MERGE INTO employee_s2 t 
+using employee_s1 s
+on (t.id = s.id)
+when matched and s.salary > 10000 
+then delete
+when matched
+then update set name = s.name, designation = s.designation, salary = s.salary, location = s.location
+when not matched 
+then insert values (s.id, s.name, s.designation, s.salary, s.location);
+
+-- Checking delete:
+
+insert into employee_s1 values (7,'ggg','officer',11000,'kol'); -- new row with salary > 10000
+
+Execute merge
+
+select * from employee_s1;
+
+select * from employee_s2; -- Gets inserted first time into employee_s2 because new id, next time gets deleted because there is a match
+
+-- Checking delete:
+
+-- Clear S3 bucket for table employee_s1
+
+insert into employee_s1 values (1,'aaa','officer',21000,'bng');  // new values for id 1 with salary > 10000
+insert into employee_s1 values (2,'bbb','supervisor',2000,'chn');
+insert into employee_s1 values (3,'ccc','manager',3000,'dlh');
+insert into employee_s1 values (4,'ddd','officer',4000,'mum');
+insert into employee_s1 values (5,'eee','officer',5000,'bng');
+insert into employee_s1 values (6,'fff','officer',6000,'chn');
+
+Execute merge
+
+select * from employee_s1;
+
+select * from employee_s2; -- id = 1 gets deleted from target table
+
+-- Check update
+
+Clear S3 bucket for table employee_s1
+
+insert into employee_s1 values (1,'aaa','officer',1000,'bng');
+insert into employee_s1 values (2,'bbb','supervisor',2000,'chn');
+insert into employee_s1 values (3,'ccc','manager',3000,'dlh');
+insert into employee_s1 values (4,'ddd','officer',4000,'mum');
+insert into employee_s1 values (6,'fff','officer',6000,'chn');
+insert into employee_s1 values (5,'eee','senior officer',6500,'kol');  // new values for id 5
+
+execute merge 
+
+select * from employee_s1;
+
+select * from employee_s2; -- id = 5 gets updated with new attribute values
